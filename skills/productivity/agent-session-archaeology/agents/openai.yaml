@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Session Archaeology"
+  short_description: "Review project sessions with an offline Rust CLI"
+  default_prompt: "Use $agent-session-archaeology and the installed sarch Rust CLI to recover debugging evidence or update the guide incrementally by default, preserve IDs and earlier evidence, number populated chapters consecutively, and pass required evidence and guide checks before completion."
