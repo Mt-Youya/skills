@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fix Git Author"
+  short_description: "Safely correct the latest Git commit's author and committer."
+  default_prompt: "Use $fix-git-author to correct the latest commit's author and committer, preserve existing work, and safely update the established upstream unless I request a local-only repair."
