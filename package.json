@@ -1,0 +1,17 @@
+{
+  "name": "cyrus-skills",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Cyrus's agent skills for real engineering",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mt-Youya/skills"
+  },
+  "license": "MIT",
+  "scripts": {},
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.7.0",
+    "@changesets/cli": "^2.30.0"
+  },
+  "packageManager": "pnpm@12.14.0"
+}

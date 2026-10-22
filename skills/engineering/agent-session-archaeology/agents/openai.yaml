@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Session Archaeology"
+  short_description: "Filter project sessions and record evidence-backed lessons"
+  default_prompt: "Use $agent-session-archaeology to capture a current pitfall, find earlier debugging methods, or perform a full/incremental review as requested. Confirm authorized scope and actual source support first, reuse existing inventories, and review real conversations and tool results using original coordinates. Deduplicate and supplement the existing guide with symptoms, diagnosis, proposals, resolution, and actual verification. Track parse coverage, semantic review, unread ranges, and missing records separately; do not treat Node --full as complete evidence or workflow examples as executed calls."

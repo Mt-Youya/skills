@@ -1,0 +1,4 @@
+interface:
+  display_name: "Generate Commit Message"
+  short_description: "Generate Conventional Commit messages from Git changes."
+  default_prompt: "Use $gen-commit to generate a commit message for current changes."

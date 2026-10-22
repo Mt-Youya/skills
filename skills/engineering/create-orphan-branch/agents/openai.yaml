@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Orphan Branch"
+  short_description: "Create a safe, empty Git orphan branch."
+  default_prompt: "Use $create-orphan-branch to create an empty-history branch."
