@@ -1,7 +1,7 @@
 {
   "name": "cyrus-skills",
   "version": "0.0.1",
-  "private": true,
+  "private": false,
   "description": "Cyrus's agent skills for real engineering",
   "license": "MIT",
   "repository": {
