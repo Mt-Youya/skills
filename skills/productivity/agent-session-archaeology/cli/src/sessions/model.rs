@@ -1,13 +1,8 @@
-use crate::{files, redact};
-use anyhow::{bail, Context, Result};
+use crate::storage::redact;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{
-    fs,
-    io::{BufRead, BufReader},
-    path::{Path, PathBuf},
-};
+use std::{fs, path::PathBuf};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -146,20 +141,6 @@ pub fn tool_blocks(session: &mut Session, content: &Value, time: Option<i64>, li
     }
 }
 
-pub fn input(file: &Path) -> Result<Box<dyn BufRead>> {
-    let input = fs::File::open(file).with_context(|| format!("cannot open {}", file.display()))?;
-    if matches!(
-        file.extension().and_then(|v| v.to_str()),
-        Some("zstd" | "zst")
-    ) {
-        Ok(Box::new(BufReader::new(zstd::stream::read::Decoder::new(
-            input,
-        )?)))
-    } else {
-        Ok(Box::new(BufReader::new(input)))
-    }
-}
-
 pub fn timestamp(value: Option<i64>) -> String {
     value
         .and_then(DateTime::<Utc>::from_timestamp_millis)
@@ -201,39 +182,4 @@ pub fn markdown(session: &Session, full: bool) -> String {
         output.push('\n');
     }
     redact::text(&output)
-}
-
-pub fn page(file: &Path, from: usize, to: Option<usize>, limit: usize) -> Result<Value> {
-    if from == 0 || limit == 0 {
-        bail!("--from and --limit must be greater than zero");
-    }
-    let to = to.unwrap_or_else(|| from.saturating_add(limit - 1));
-    if to < from {
-        bail!("--to precedes --from");
-    }
-    let mut reader = input(file)?;
-    let mut text = String::new();
-    let mut records = Vec::new();
-    let mut n = 0;
-    let mut eof = false;
-    loop {
-        text.clear();
-        if reader.read_line(&mut text)? == 0 {
-            eof = true;
-            break;
-        }
-        n += 1;
-        if n > to {
-            break;
-        }
-        if n >= from {
-            records.push(json!({"line":n,"text":redact::text(text.trim_end_matches('\n'))}));
-        }
-    }
-    if records.is_empty() {
-        bail!("start line {from} exceeds file length {n}");
-    }
-    Ok(
-        json!({"file":files::absolute(file)?,"from":from,"to":records.last().unwrap()["line"],"read_to_eof":eof,"next_from":if eof{Value::Null}else{json!(to.saturating_add(1))},"lines":records,"semantic_review":"not_reviewed"}),
-    )
 }

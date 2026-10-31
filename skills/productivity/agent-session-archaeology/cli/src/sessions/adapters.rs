@@ -1,4 +1,4 @@
-use crate::session::{self, Session};
+use super::model::{self as session, Session};
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 

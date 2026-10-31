@@ -24,7 +24,7 @@ impl Environment {
             .clone()
             .or_else(|| std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }))
             .context("home directory unavailable; set SESSION_ARCHAEOLOGY_HOME")?;
-        let home = crate::files::absolute(&PathBuf::from(home))?;
+        let home = crate::storage::files::absolute(&PathBuf::from(home))?;
         let mut app_roots = vec![
             home.join("Library/Application Support"),
             home.join(".config"),

@@ -1,4 +1,4 @@
-use crate::files;
+use crate::storage::files;
 use anyhow::{bail, Context, Result};
 use regex::Regex;
 use serde::Serialize;

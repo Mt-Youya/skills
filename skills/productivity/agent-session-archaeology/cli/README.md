@@ -190,6 +190,25 @@ The retired entrypoints map to the installed command as follows:
 | `build-guide-index.mjs --json` | `--json guide inventory` |
 | `build-guide-index.mjs [--check]` | `guide index [--check]` |
 
+## Source layout
+
+```text
+src/
+├── main.rs             executable entry point
+├── cli/                argument parsing, command dispatch and output/exit handling
+├── sessions/           discovery, parsing, adapters, model, paging, export and incremental state
+├── guide/              topic inventory/indexing and the evidence archive
+└── storage/            path/file operations and redaction
+benches/
+└── compare.rs          optional Rust binary-comparison benchmark
+```
+
+`cli` composes the session and guide operations; both domains use `storage`. Storage does not
+import domain modules. Within `sessions`, `discovery.rs` inventories sources, `parse.rs` parses
+one original, `registry.rs` verifies registry ownership, `read.rs` pages raw originals, and
+`export.rs` writes redacted exports. This keeps
+discovery, interpretation of source formats, and output generation separately navigable.
+
 ## Development
 
 ```sh
@@ -204,10 +223,11 @@ No transcript or fixture is required at a path relative to the installed binary.
 For a reproducible comparison, preserve an old release binary, build the new release, then run:
 
 ```sh
-python3 bench/compare.py /private/search-before target/release/search
+cargo build --release --locked
+cargo bench --bench compare -- /private/search-before target/release/search
 ```
 
-This optional development benchmark requires Python 3, creates only temporary synthetic stores,
+This optional Rust benchmark reuses the CLI dependencies and creates only temporary synthetic stores,
 alternates binary order, and checks preservation of existing JSON fields (new metadata fields are allowed) before reporting five-run medians.
 One local run reduced a 30,000-event scan from 0.514 s to 0.065 s (7.9×); large-line paging
 remained about 0.056 s. A later comparison of incremental mode on the same 30,000-event fixture

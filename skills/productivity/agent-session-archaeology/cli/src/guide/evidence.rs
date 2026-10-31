@@ -1,4 +1,5 @@
-use crate::{files, guide, redact};
+use super::index as guide;
+use crate::storage::{files, redact};
 use anyhow::{bail, Context, Result};
 use flate2::{read::MultiGzDecoder, write::GzEncoder, Compression};
 use regex::Regex;

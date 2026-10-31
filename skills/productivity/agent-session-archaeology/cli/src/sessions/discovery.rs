@@ -1,10 +1,6 @@
-use crate::{
-    adapters,
-    environment::Environment,
-    files,
-    incremental::{self, Inventory},
-    session::{self, Session},
-};
+use super::registry::{contains as registered, load as registry};
+use super::{environment::Environment, incremental::Inventory, model::Session, parse::parse_file};
+use crate::storage::files;
 use anyhow::{Context, Result};
 use percent_encoding::percent_decode_str;
 use regex::Regex;
@@ -12,7 +8,6 @@ use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    io::BufRead,
     path::{Path, PathBuf},
 };
 
@@ -28,7 +23,7 @@ pub struct Discovery {
 }
 
 impl Discovery {
-    fn incomplete(&self) -> bool {
+    pub(super) fn incomplete(&self) -> bool {
         self.diagnostics.iter().any(|d| d["reason"].is_string())
             || self
                 .sessions
@@ -54,171 +49,6 @@ fn existing_files(root: &Path, diagnostics: &mut Vec<Value>) -> Vec<PathBuf> {
             Vec::new()
         }
     }
-}
-
-fn registry(environment: &Environment, project: &str) -> Result<BTreeSet<String>> {
-    let file = environment.home.join(".dsh/storages/workspace.json");
-    let bytes = match fs::read(&file) {
-        Ok(bytes) => bytes,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
-        Err(e) => return Err(e).context("cannot read DSH registry"),
-    };
-    let value: Value = serde_json::from_slice(&bytes).context("cannot parse DSH registry")?;
-    let mut ids = BTreeSet::new();
-    if let Some(workspaces) = value["tables"]["workspaces"].as_object() {
-        for ws in workspaces.values() {
-            if ws["path"]
-                .as_str()
-                .is_some_and(|path| files::norm(path) == project)
-            {
-                if let Some(list) = ws["sessionIds"].as_array() {
-                    for id in list {
-                        if let Some(id) = id.as_str() {
-                            ids.insert(id.into());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(ids)
-}
-
-fn registered(ids: &BTreeSet<String>, id: &str) -> bool {
-    ids.iter()
-        .any(|wanted| wanted.trim_start_matches("session-") == id.trim_start_matches("session-"))
-}
-
-fn parse_file(
-    source: &str,
-    file: &Path,
-    project: &str,
-    content: bool,
-    registered_ids: &BTreeSet<String>,
-    folder: Option<&str>,
-    wanted_id: Option<&str>,
-) -> Result<Option<Session>> {
-    let fallback = file
-        .file_stem()
-        .context("session file lacks filename")?
-        .to_string_lossy()
-        .to_string();
-    let fallback = if source == "dsh" {
-        file.parent()
-            .and_then(|p| p.file_name())
-            .map(|v| v.to_string_lossy().into_owned())
-            .unwrap_or(fallback)
-    } else {
-        fallback
-    };
-    let mut session = Session::new(source, fallback, file.into());
-    let before = incremental::state(file)?;
-    session.cwd = folder.map(String::from);
-    // cwd is assigned only once. Avoid filesystem canonicalization for every event.
-    let mut cwd_matches = session.cwd.as_ref().map(|cwd| files::within(cwd, project));
-    if cwd_matches == Some(false) && !content {
-        return Ok(None);
-    }
-    let mut rows = Vec::new();
-    let mut reader = session::input(file)?;
-    let mut line = String::new();
-    loop {
-        line.clear();
-        if reader.read_line(&mut line)? == 0 {
-            break;
-        }
-        session.original_lines += 1;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let value: Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(_) => {
-                session.parse_errors.push(session.original_lines);
-                continue;
-            }
-        };
-        let meta = if value["type"] == "session_meta" {
-            &value["payload"]
-        } else {
-            &value
-        };
-        if (value["type"] == "session_meta" || value["type"] == "session") && meta["id"].is_string()
-        {
-            session.id = meta["id"].as_str().unwrap().into();
-            // Codex/DSH headers identify one session, independently of its filename.
-            // A targeted resolve need not decode unrelated conversation bodies.
-            if matches!(source, "codex" | "dsh")
-                && wanted_id.is_some_and(|wanted| wanted != session.id)
-            {
-                return Ok(None);
-            }
-        }
-        if session.cwd.is_none() {
-            session.cwd = meta["cwd"].as_str().map(String::from);
-            cwd_matches = session.cwd.as_ref().map(|cwd| files::within(cwd, project));
-        }
-        let in_registry = source == "dsh" && registered(registered_ids, &session.id);
-        if !content && !in_registry && cwd_matches == Some(false) {
-            return Ok(None);
-        }
-        if source == "copilot" {
-            rows.push((session.original_lines, value));
-        } else {
-            let line = session.original_lines;
-            adapters::row(&mut session, &value, line)?;
-        }
-    }
-    if source == "copilot" {
-        adapters::copilot(&mut session, &rows)?;
-    }
-    let after = incremental::state(file)?;
-    if before == after {
-        session.file_state = Some(after);
-    } else {
-        session.read_to_eof = false;
-        session.note =
-            Some("Original changed during parsing; rescan before reusing its inventory".into());
-    }
-    if wanted_id.is_some_and(|wanted| wanted != session.id) {
-        return Ok(None);
-    }
-    session.r#match = if cwd_matches == Some(true) {
-        "cwd"
-    } else if source == "dsh" && registered(registered_ids, &session.id) {
-        "registry"
-    } else if content
-        && session.messages.iter().any(|m| {
-            let text = m.text.to_lowercase();
-            text.contains(project)
-                || text.contains(&project.replace('/', "\\"))
-                || (cfg!(target_os = "macos")
-                    && project
-                        .strip_prefix("/private/")
-                        .is_some_and(|p| text.contains(&format!("/{p}"))))
-        })
-    {
-        "content"
-    } else {
-        if !session.parse_errors.is_empty() {
-            anyhow::bail!(
-                "unmatched session has invalid JSON at lines {:?}",
-                session.parse_errors
-            );
-        }
-        return Ok(None);
-    }
-    .into();
-    if session.messages.is_empty() {
-        if !session.parse_errors.is_empty() {
-            anyhow::bail!(
-                "session has no readable messages; invalid JSON at lines {:?}",
-                session.parse_errors
-            );
-        }
-        return Ok(None);
-    }
-    Ok(Some(session))
 }
 
 pub fn discover(environment: &Environment, project: &Path, content: bool) -> Result<Discovery> {
@@ -441,48 +271,4 @@ fn discover_filtered(
         incremental: since.is_some(),
         content_search: content,
     })
-}
-
-pub fn export(discovery: &Discovery, out: &Path, full: bool, dry_run: bool) -> Result<Value> {
-    let out = files::absolute(out)?;
-    let safe = Regex::new(r"[^a-zA-Z0-9._-]")?;
-    let mut outputs = Vec::new();
-    let mut index=String::from("# Agent sessions for this project\n\n| Source | Session | Messages | Export |\n| --- | --- | --- | --- |\n");
-    for session in &discovery.sessions {
-        let name = format!(
-            "{}--{}.md",
-            session.source,
-            safe.replace_all(&session.id, "_")
-        );
-        let path = out.join(&name);
-        let text = session::markdown(session, full);
-        let changed = if dry_run {
-            fs::read(&path).map_or(true, |old| old != text.as_bytes())
-        } else {
-            files::atomic_write(&path, text.as_bytes())?
-        };
-        outputs.push(json!({"path":path,"bytes":text.len(),"changed":changed,"source":session.source,"id":session.id}));
-        index.push_str(&format!(
-            "| {} | `{}` | {} | [{}](./{}) |\n",
-            session.source,
-            session.id,
-            session.messages.len(),
-            name,
-            name
-        ));
-    }
-    if !dry_run && !outputs.is_empty() {
-        files::atomic_write(
-            &out.join("index.md"),
-            crate::redact::text(&index).as_bytes(),
-        )?;
-        files::atomic_write(
-            &out.join("coverage.json"),
-            &serde_json::to_vec_pretty(&discovery.report())?,
-        )?;
-        crate::redact::directory(&out, false)?;
-    }
-    Ok(
-        json!({"out":out,"files":outputs,"dry_run":dry_run,"diagnostics":discovery.diagnostics,"registry":discovery.registry,"incomplete":discovery.incomplete(),"semantic_review":"not_reviewed"}),
-    )
 }

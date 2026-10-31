@@ -5,6 +5,10 @@ edition = "2021"
 description = "Offline agent-session discovery and evidence-backed guide maintenance"
 license = "MIT"
 
+[[bench]]
+name = "compare"
+harness = false
+
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
