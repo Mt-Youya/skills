@@ -38,6 +38,7 @@ pub struct Session {
     pub original_lines: usize,
     pub parse_errors: Vec<usize>,
     pub read_to_eof: bool,
+    pub file_state: Option<Value>,
 }
 
 impl Session {
@@ -56,6 +57,7 @@ impl Session {
             original_lines: 0,
             parse_errors: Vec::new(),
             read_to_eof: true,
+            file_state: None,
         }
     }
     pub fn stamp(&mut self, time: Option<i64>) {
@@ -92,7 +94,7 @@ impl Session {
         });
     }
     pub fn row(&self) -> Value {
-        json!({"source":self.source,"id":self.id,"file":self.file,"cwd":self.cwd,"title":self.title.as_deref().map(redact::text),"startedAt":self.started_at,"endedAt":self.ended_at,"messages":self.messages.len(),"userMessages":self.messages.iter().filter(|m|m.role=="user").count(),"match":self.r#match,"bytes":fs::metadata(&self.file).map_or(0,|m|m.len()),"original_lines":self.original_lines,"parse_errors":self.parse_errors,"read_to_eof":self.read_to_eof,"semantic_review":"not_reviewed"})
+        json!({"source":self.source,"id":self.id,"file":self.file,"cwd":self.cwd,"title":self.title.as_deref().map(redact::text),"startedAt":self.started_at,"endedAt":self.ended_at,"messages":self.messages.len(),"userMessages":self.messages.iter().filter(|m|m.role=="user").count(),"match":self.r#match,"bytes":fs::metadata(&self.file).map_or(0,|m|m.len()),"original_lines":self.original_lines,"file_state":self.file_state,"parse_errors":self.parse_errors,"read_to_eof":self.read_to_eof,"semantic_review":"not_reviewed"})
     }
 }
 

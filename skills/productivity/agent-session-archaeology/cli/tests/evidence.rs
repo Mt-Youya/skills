@@ -41,7 +41,7 @@ impl Fixture {
         }
     }
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_sarch"))
+        Command::new(env!("CARGO_BIN_EXE_search"))
             .current_dir(self.root.path())
             .env("SESSION_ARCHAEOLOGY_HOME", self.root.path().join("stores"))
             .arg("--json")

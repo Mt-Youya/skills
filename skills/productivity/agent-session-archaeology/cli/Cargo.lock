@@ -347,7 +347,7 @@ dependencies = [
  "zmij",
 ]
 [[package]]
-name = "sarch"
+name = "search"
 version = "0.1.0"
 dependencies = [
  "anyhow",

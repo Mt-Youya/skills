@@ -63,6 +63,9 @@ pub enum Sessions {
     Scan {
         #[command(flatten)]
         scope: Scope,
+        /// Reuse unchanged metadata from a previous scan/coverage.json, not review progress
+        #[arg(long, conflicts_with = "content")]
+        since: Option<PathBuf>,
     },
     /// Resolve an exact source/ID to an original file; fails on ambiguity
     Resolve {

@@ -9,4 +9,4 @@ check:
 install-local:
 	cargo build --release --locked
 	install -d "$(PREFIX)/bin"
-	install -m 755 target/release/sarch "$(PREFIX)/bin/sarch"
+	install -m 755 target/release/search "$(PREFIX)/bin/search"

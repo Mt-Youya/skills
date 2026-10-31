@@ -4,11 +4,12 @@ mod environment;
 mod evidence;
 mod files;
 mod guide;
+mod incremental;
 mod redact;
 mod session;
 mod sources;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use args::{Cli, Command, Evidence, Guide, Sessions};
 use clap::Parser;
 use serde_json::{json, Value};
@@ -34,28 +35,20 @@ fn run(cli: Cli) -> Result<Value> {
         }
         Command::Sessions { command } => match command {
             Sessions::Read(args) => page(&args),
-            Sessions::Scan { scope } => Ok(sources::discover(
+            Sessions::Scan { scope, since } => Ok(sources::scan(
                 &environment::Environment::load()?,
                 &scope.project,
                 scope.content,
+                since.as_deref(),
             )?
             .report()),
-            Sessions::Resolve { scope, id, source } => {
-                let discovery = sources::discover(
-                    &environment::Environment::load()?,
-                    &scope.project,
-                    scope.content,
-                )?;
-                let found: Vec<_> = discovery
-                    .sessions
-                    .iter()
-                    .filter(|s| s.id == id && source.as_ref().is_none_or(|src| src == &s.source))
-                    .collect();
-                if found.len() != 1 {
-                    bail!("expected one source/session match for {id}, found {}; use --source to disambiguate",found.len());
-                }
-                Ok(found[0].row())
-            }
+            Sessions::Resolve { scope, id, source } => sources::resolve(
+                &environment::Environment::load()?,
+                &scope.project,
+                scope.content,
+                &id,
+                source.as_deref(),
+            ),
             Sessions::Export {
                 scope,
                 out,

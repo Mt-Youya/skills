@@ -30,7 +30,7 @@ impl Fixture {
         file
     }
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_sarch"))
+        Command::new(env!("CARGO_BIN_EXE_search"))
             .current_dir(&self.project)
             .env("SESSION_ARCHAEOLOGY_HOME", &self.home)
             .arg("--json")
@@ -54,9 +54,30 @@ impl Fixture {
 }
 
 #[test]
+fn late_ownership_preserves_earlier_events_and_original_coordinates() {
+    let f = Fixture::new();
+    f.file(".codex/sessions/late.jsonl", &format!("{}\n{}\n{{broken\n{}\n",
+        json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"before metadata"}]}}),
+        json!({"type":"session_meta","payload":{"id":"late","cwd":f.project}}),
+        json!({"type":"response_item","payload":{"type":"function_call_output","output":"after malformed event"}})));
+    let data = f.scan();
+    assert_eq!(data["sessions"][0]["match"], "cwd");
+    assert_eq!(data["sessions"][0]["messages"], 2);
+    assert_eq!(data["sessions"][0]["original_lines"], 4);
+    assert_eq!(data["sessions"][0]["parse_errors"], json!([3]));
+    assert_eq!(
+        f.run(&["sessions", "export", "--full"]).status.code(),
+        Some(1)
+    );
+    let text = fs::read_to_string(f.project.join(".agent-sessions/codex--late.md")).unwrap();
+    assert!(text.contains("Original line 1\n\nbefore metadata"));
+    assert!(text.contains("Original line 4\n\nafter malformed event"));
+}
+
+#[test]
 fn help_and_offline_doctor_work_without_accounts_or_sources() {
     let f = Fixture::new();
-    let help = Command::new(env!("CARGO_BIN_EXE_sarch"))
+    let help = Command::new(env!("CARGO_BIN_EXE_search"))
         .arg("--help")
         .output()
         .unwrap();

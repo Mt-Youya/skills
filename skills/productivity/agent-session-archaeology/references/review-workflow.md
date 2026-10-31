@@ -1,12 +1,50 @@
 ## Full review and debugging
 
+### Incremental full review: reuse parsing and semantic progress separately
+
+The first review must establish a finite inventory. Save `search --json sessions scan --project DIR`
+output in a private, gitignored inventory file. On later runs:
+
+```sh
+search --json sessions scan --project /work/project --since /private/inventory.previous.json
+```
+
+Save the complete returned envelope as the next inventory **after successful capture**, without
+truncating it or overwriting the previous file before the command reads it. A returned partial
+inventory is useful evidence, but preserve the previous inventory until failures are reconciled.
+An exported `coverage.json` can also seed this scan. Old inventories without file fingerprints
+trigger parsing instead of an unsafe cache hit. The same `--since` mode can be chained repeatedly.
+
+- `sessions`: new or changed matching files that were parsed on this run. Review their conversations
+  and reconcile findings with existing IDs. Larger size alone does not prove append-only changes;
+  rereview a changed original unless its previously reviewed prefix is independently verified.
+- `unchanged`: metadata reused without parsing bodies. Join with the separate semantic progress
+  by source, full session ID and original file. Skip only ranges already semantically complete;
+  resume unread/partial sessions even when unchanged. These rows still say `not_reviewed` because
+  the CLI never infers semantic completion. Do not reexport or reread completed unchanged sessions.
+- `not_seen`: previous originals not returned in the current owned scope. They may be missing,
+  unavailable, superseded by a newer version/compressed sibling, or no longer owned by the project. Resolve that distinction and
+  preserve prior findings/progress. Do not call them newly reviewed or silently delete their guide entries.
+
+Fingerprints use bytes and nanosecond modification time, plus device/inode/change time on Unix.
+They detect ordinary appends, rewrites and replacements, not deliberate metadata tampering. Use a
+fresh scan without `--since` for an explicit from-scratch review or untrusted baseline. Changed
+source registries are checked again; malformed or incompletely parsed originals are never reused.
+`--since` rejects other-project/content-search baselines and cannot be combined with `--content`.
+
+For full guide updates, load guide inventory once, read the new/changed/unread session scope,
+append findings/evidence, then rebuild/check once per batch. Persist semantic progress per completed
+session or bounded batch, not by repeatedly rewriting every entry after each page. Reuse known
+original paths from inventories; resolve them again only if unavailable. Small independent reads
+can share one tool call within the context budget; do not dump many large sessions at once.
+
 ### Page an ownership-confirmed original
 
 Use the installed Rust CLI with a file from an authorized inventory. Paging an exact file does
 not trigger discovery. These are usage placeholders, not claims of completed review:
 
 ```sh
-sarch --json read --file /private/authorized-session.jsonl.zstd --from 1 --to 200
+search --json read --file /private/authorized-session.jsonl.zstd --from 1 --to 200
 # Continue with --from 201 --to 400 until the declared finite scope is actually reviewed.
 ```
 
@@ -88,21 +126,21 @@ Users append in batches over time, and one session is megabytes — archiving wh
 - When an older guide lacks archived evidence, backfill from available originals. If evidence is unavailable, retain the entry, report the missing IDs, and mark the update incomplete rather than fabricate evidence or silently pass validation.
 
 ```bash
-sarch evidence add    --guide docs/avoiding-pitfalls-guide \
+search evidence add    --guide docs/avoiding-pitfalls-guide \
   --id VER-02 --title "cross-machine clock skew" \
   --segment <exported-session.md>:7210-7320 \
   --segment <another-session.md>:640-688        # repeatable; multi-range and cross-session are fine
 # Reusing an ID preserves its archived segments and appends only new evidence.
-sarch evidence show   --guide docs/avoiding-pitfalls-guide --id VER-02
-sarch evidence list   --guide docs/avoiding-pitfalls-guide
-sarch evidence remove --guide docs/avoiding-pitfalls-guide --id VER-02
-sarch evidence unpack --guide docs/avoiding-pitfalls-guide   # readable copy, outside the repo
-sarch evidence check  --guide docs/avoiding-pitfalls-guide   # required coverage + size audit
-sarch guide index    --guide docs/avoiding-pitfalls-guide   # rebuild the README index
-sarch guide index    --guide docs/avoiding-pitfalls-guide --check
+search evidence show   --guide docs/avoiding-pitfalls-guide --id VER-02
+search evidence list   --guide docs/avoiding-pitfalls-guide
+search evidence remove --guide docs/avoiding-pitfalls-guide --id VER-02
+search evidence unpack --guide docs/avoiding-pitfalls-guide   # readable copy, outside the repo
+search evidence check  --guide docs/avoiding-pitfalls-guide   # required coverage + size audit
+search guide index    --guide docs/avoiding-pitfalls-guide   # rebuild the README index
+search guide index    --guide docs/avoiding-pitfalls-guide --check
 ```
 
-**Completion requires the archive.** Run `sarch evidence check` after every guide creation/update and read back the added sections with `evidence show --id`. Missing, empty, unreadable archives or independent IDs without evidence fail the check (exit 1); exceeding the size budget exits 2. Do not report the guide complete until evidence coverage and the README index check both pass.
+**Completion requires the archive.** Run `search evidence check` after every guide creation/update and read back the added sections with `evidence show --id`. Missing, empty, unreadable archives or independent IDs without evidence fail the check (exit 1); exceeding the size budget exits 2. Do not report the guide complete until evidence coverage and the README index check both pass.
 
 Two guards exist because both mistakes were made for real:
 
@@ -114,7 +152,7 @@ Two guards exist because both mistakes were made for real:
 A repository may already carry a guide from an earlier run. **Incremental is the default; do not ask again.** Preserve its hand-written prose, IDs, evidence, and review progress. Only an explicit request to start from scratch changes the review mode; it does not authorize deleting existing guide content. Repair chapter-number gaps as described above without renumbering pitfall IDs.
 
 ```bash
-sarch --json guide inventory --guide <guide-dir>
+search --json guide inventory --guide <guide-dir>
 ```
 
 That prints the inventory: every existing `id`, `source`, `reference` (`—` for an independent record), `independentCount`, `referenceCount`, per-topic counts, and `nextIds` — the next free id per prefix, including retained reference IDs. The parser retains `·` inside provenance and stops only at the next recognized metadata label. Still compare the inventory with original topic metadata before evidence deduplication: a complete `source` string does not prove that its original transcript was available or reviewed. Report mismatches rather than silently treating them as missing evidence. Use it to:
@@ -122,7 +160,7 @@ That prints the inventory: every existing `id`, `source`, `reference` (`—` for
 1. **Deduplicate at two levels before appending.** Group sessions by `(source, full session_id)`, take the highest DSH version, and do not count MAgent history/updates/recap as separate sessions. Do not blindly strip ID prefixes across different sources. Identify evidence by `(source, session_id, original file, original range/event_id)`, then compare symptoms, confirmed root causes, and resolution constraints. When an existing pitfall matches, add sources, failed attempts, status, and new verification to it. Similar titles alone do not justify merging different failures; overlapping ranges or duplicate messages must not erase new facts.
 2. **Continue the numbering** from `nextIds` for new records. Matched findings keep their existing ID; never assign it to a different pitfall.
 3. **Append to the matching topic file**, at the end. Do not reorder, renumber or rewrite existing records. Add new evidence to the same archive ID; `add` retains earlier segments and skips duplicate excerpts.
-4. **Rebuild the index** (`sarch guide index`); it rewrites only the region between the README's marker comments and leaves the prose alone. Run the required archive coverage and index checks before finishing.
+4. **Rebuild the index** (`search guide index`); it rewrites only the region between the README's marker comments and leaves the prose alone. Run the required archive coverage and index checks before finishing.
 
 **Deduplicated reference entries**: keep the existing heading/ID as a stable navigation entry; never delete or renumber it. Put `reference` before `source` on the same metadata line (the parser stops collecting metadata when it sees `source`), for example:
 
@@ -152,24 +190,12 @@ The guide is read by people, not by the agent that produced it.
 
 **1. Write in the user's language.** Whatever language the conversation is in, the guide body uses it — titles, the seven sections, the README prose. Only the metadata labels (`batch`, `severity`, `status`, `source`) stay English, because the CLI parses them.
 
-**2. Humanize before finishing.** Resolve a humanizer nearest-first, and stop at the first hit — the same way configuration lookup works, a narrower scope wins:
+**2. Edit locally before finishing.** Apply the prose rules below directly. Do not search the
+network, install packages or load another skill as an implicit dependency of historical review.
+Only use an additional writing skill if the user explicitly requests it. This avoids extra latency
+and prevents unreviewed third-party instructions from gaining authority over transcript handling.
 
-1. **This repository.** `<project>/.agents/skills/`, `<project>/.claude/skills/`. A project-local humanizer is the most relevant one that can exist: someone chose it for _this_ codebase's voice and language.
-2. **This machine.** `~/.agents/skills/`, `~/.claude/skills/`, `~/.codex/skills/`, plus the skill list the client injects into the session. Look for a name containing `humaniz` (or the equivalent in the user's language).
-3. **The open ecosystem** — [skills.sh](https://skills.sh) and GitHub — only once 1 and 2 both came up empty. Run the CLI **with the package manager the project declares** — `npx` inside a pnpm repo dies with `EBADDEVENGINES`, which is a mismatch to respect, not to work around by leaving the directory:
-   ```bash
-   pnpm dlx skills find "humanizer <language>"   # project pins pnpm
-   npx      skills find "humanizer <language>"   # npm, or no pin
-   yarn dlx skills find "humanizer <language>"   # yarn
-   bunx     skills find "humanizer <language>"   # bun
-   ```
-   If the CLI cannot start at all — a sandbox that denies writes to the package-manager cache (`ERR_PNPM_CLI_DLX_CACHE`, npm `EPERM`), no network, or the tool is missing — do not stop there: search the web for `skills.sh humanizer <language>`. The `skills.sh` search page is client-rendered and its API requires a Vercel OIDC token, so a plain web search is the route that works when the CLI is unavailable.
-
-If one turns up at any level, **use it as-is** — do not keep searching for a "better" one. If all three come up empty, do not stall and do not install anything without asking; apply the rules below.
-
-Naming convention in the ecosystem: plain `humanizer` is the English one; localized versions carry a language suffix (`humanizer-zh`, `humanizer-ja`, …). Pick the one matching **the language the user is writing in** — not the language of this skill.
-
-The rules to apply when no humanizer is available:
+Prose rules:
 
 - **Concrete beats abstract.** "The local clock ran 12 s ahead of Supabase" — not "a time-synchronisation issue was present".
 - **One idea per paragraph.** Cut the pile-up of parallel clauses that machine prose defaults to.

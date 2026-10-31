@@ -2,6 +2,7 @@ use crate::{
     adapters,
     environment::Environment,
     files,
+    incremental::{self, Inventory},
     session::{self, Session},
 };
 use anyhow::{Context, Result};
@@ -20,18 +21,25 @@ pub struct Discovery {
     pub diagnostics: Vec<Value>,
     pub registry: Value,
     pub project: PathBuf,
+    pub unchanged: Vec<Value>,
+    pub not_seen: Vec<Value>,
+    pub incremental: bool,
+    pub content_search: bool,
 }
 
 impl Discovery {
     fn incomplete(&self) -> bool {
         self.diagnostics.iter().any(|d| d["reason"].is_string())
-            || self.sessions.iter().any(|s| !s.parse_errors.is_empty())
+            || self
+                .sessions
+                .iter()
+                .any(|s| !s.parse_errors.is_empty() || !s.read_to_eof)
             || self.registry["missing"]
                 .as_array()
                 .is_some_and(|v| !v.is_empty())
     }
     pub fn report(&self) -> Value {
-        json!({"project":files::norm(&self.project.to_string_lossy()),"root":self.project,"sessions":self.sessions.iter().map(Session::row).collect::<Vec<_>>(),"diagnostics":self.diagnostics,"registry":self.registry,"incomplete":self.incomplete(),"semantic_review":"not_reviewed"})
+        json!({"project":files::norm(&self.project.to_string_lossy()),"root":self.project,"sessions":self.sessions.iter().map(Session::row).collect::<Vec<_>>(),"unchanged":self.unchanged,"not_seen":self.not_seen,"incremental":self.incremental,"content_search":self.content_search,"diagnostics":self.diagnostics,"registry":self.registry,"incomplete":self.incomplete(),"semantic_review":"not_reviewed"})
     }
 }
 
@@ -88,6 +96,7 @@ fn parse_file(
     content: bool,
     registered_ids: &BTreeSet<String>,
     folder: Option<&str>,
+    wanted_id: Option<&str>,
 ) -> Result<Option<Session>> {
     let fallback = file
         .file_stem()
@@ -103,8 +112,11 @@ fn parse_file(
         fallback
     };
     let mut session = Session::new(source, fallback, file.into());
+    let before = incremental::state(file)?;
     session.cwd = folder.map(String::from);
-    if folder.is_some_and(|cwd| !files::within(cwd, project)) && !content {
+    // cwd is assigned only once. Avoid filesystem canonicalization for every event.
+    let mut cwd_matches = session.cwd.as_ref().map(|cwd| files::within(cwd, project));
+    if cwd_matches == Some(false) && !content {
         return Ok(None);
     }
     let mut rows = Vec::new();
@@ -134,34 +146,44 @@ fn parse_file(
         if (value["type"] == "session_meta" || value["type"] == "session") && meta["id"].is_string()
         {
             session.id = meta["id"].as_str().unwrap().into();
+            // Codex/DSH headers identify one session, independently of its filename.
+            // A targeted resolve need not decode unrelated conversation bodies.
+            if matches!(source, "codex" | "dsh")
+                && wanted_id.is_some_and(|wanted| wanted != session.id)
+            {
+                return Ok(None);
+            }
         }
         if session.cwd.is_none() {
             session.cwd = meta["cwd"].as_str().map(String::from);
+            cwd_matches = session.cwd.as_ref().map(|cwd| files::within(cwd, project));
         }
         let in_registry = source == "dsh" && registered(registered_ids, &session.id);
-        if !content
-            && !in_registry
-            && session
-                .cwd
-                .as_ref()
-                .is_some_and(|cwd| !files::within(cwd, project))
-        {
+        if !content && !in_registry && cwd_matches == Some(false) {
             return Ok(None);
         }
-        rows.push((session.original_lines, value));
-    }
-    if source == "copilot" {
-        adapters::copilot(&mut session, &rows)?;
-    } else {
-        for (line, value) in rows {
+        if source == "copilot" {
+            rows.push((session.original_lines, value));
+        } else {
+            let line = session.original_lines;
             adapters::row(&mut session, &value, line)?;
         }
     }
-    session.r#match = if session
-        .cwd
-        .as_ref()
-        .is_some_and(|cwd| files::within(cwd, project))
-    {
+    if source == "copilot" {
+        adapters::copilot(&mut session, &rows)?;
+    }
+    let after = incremental::state(file)?;
+    if before == after {
+        session.file_state = Some(after);
+    } else {
+        session.read_to_eof = false;
+        session.note =
+            Some("Original changed during parsing; rescan before reusing its inventory".into());
+    }
+    if wanted_id.is_some_and(|wanted| wanted != session.id) {
+        return Ok(None);
+    }
+    session.r#match = if cwd_matches == Some(true) {
         "cwd"
     } else if source == "dsh" && registered(registered_ids, &session.id) {
         "registry"
@@ -200,10 +222,55 @@ fn parse_file(
 }
 
 pub fn discover(environment: &Environment, project: &Path, content: bool) -> Result<Discovery> {
+    discover_filtered(environment, project, content, None, None)
+}
+
+pub fn scan(
+    environment: &Environment,
+    project: &Path,
+    content: bool,
+    since: Option<&Path>,
+) -> Result<Discovery> {
+    discover_filtered(environment, project, content, None, since)
+}
+
+pub fn resolve(
+    environment: &Environment,
+    project: &Path,
+    content: bool,
+    id: &str,
+    source: Option<&str>,
+) -> Result<Value> {
+    let discovery = discover_filtered(environment, project, content, Some((id, source)), None)?;
+    let found: Vec<_> = discovery.sessions.iter().collect();
+    if found.len() != 1 {
+        anyhow::bail!(
+            "expected one source/session match for {id}, found {}; use --source to disambiguate",
+            found.len()
+        );
+    }
+    Ok(found[0].row())
+}
+
+fn discover_filtered(
+    environment: &Environment,
+    project: &Path,
+    content: bool,
+    target: Option<(&str, Option<&str>)>,
+    since: Option<&Path>,
+) -> Result<Discovery> {
+    let includes =
+        |source: &str| target.is_none_or(|(_, wanted)| wanted.is_none_or(|s| s == source));
     let project = files::absolute(project)?;
     let normalized = files::norm(&project.to_string_lossy());
+    let previous = Inventory::load(since, &normalized)?;
+    let mut unchanged = Vec::new();
     let mut diagnostics = Vec::new();
-    let ids = match registry(environment, &normalized) {
+    let ids = match if includes("dsh") {
+        registry(environment, &normalized)
+    } else {
+        Ok(BTreeSet::new())
+    } {
         Ok(ids) => ids,
         Err(e) => {
             diagnostics.push(json!({"source":"dsh-registry","reason":e.to_string()}));
@@ -216,6 +283,9 @@ pub fn discover(environment: &Environment, project: &Path, content: bool) -> Res
         ("claude-code", environment.home.join(".claude/projects")),
         ("codex", environment.home.join(".codex/sessions")),
     ] {
+        if !includes(source) {
+            continue;
+        }
         let files: Vec<_> = existing_files(&root, &mut diagnostics)
             .into_iter()
             .filter(|path| {
@@ -235,7 +305,11 @@ pub fn discover(environment: &Environment, project: &Path, content: bool) -> Res
     let dsh = environment.home.join(".dsh/sessions");
     let mut versions = BTreeMap::<PathBuf, (u64, PathBuf)>::new();
     let version_re = Regex::new(r"^session\.v(\d+)\.jsonl\.zstd$")?;
-    for path in existing_files(&dsh, &mut diagnostics) {
+    for path in if includes("dsh") {
+        existing_files(&dsh, &mut diagnostics)
+    } else {
+        Vec::new()
+    } {
         if let Some(caps) = path
             .file_name()
             .and_then(|s| s.to_str())
@@ -255,7 +329,7 @@ pub fn discover(environment: &Environment, project: &Path, content: bool) -> Res
     }
     let mut seen = BTreeSet::new();
     for store in environment.vscode_stores() {
-        if !store.exists() || !seen.insert(store.clone()) {
+        if !includes("copilot") || !store.exists() || !seen.insert(store.clone()) {
             continue;
         }
         for file in existing_files(&store, &mut diagnostics)
@@ -295,6 +369,16 @@ pub fn discover(environment: &Environment, project: &Path, content: bool) -> Res
         }
     }
     for (source, file, folder) in inputs {
+        if let Some(row) = previous.unchanged(&source, &file) {
+            let owned = row["cwd"]
+                .as_str()
+                .is_some_and(|cwd| files::within(cwd, &normalized))
+                || (source == "dsh" && row["id"].as_str().is_some_and(|id| registered(&ids, id)));
+            if owned {
+                unchanged.push(row);
+                continue;
+            }
+        }
         match parse_file(
             &source,
             &file,
@@ -302,6 +386,7 @@ pub fn discover(environment: &Environment, project: &Path, content: bool) -> Res
             content,
             &ids,
             folder.as_deref(),
+            target.map(|(id, _)| id),
         ) {
             Ok(Some(session)) => sessions.push(session),
             Ok(None) => {}
@@ -311,16 +396,38 @@ pub fn discover(environment: &Environment, project: &Path, content: bool) -> Res
         }
     }
     sessions.sort_by_key(|s| s.started_at.unwrap_or(0));
-    let mut identities = BTreeSet::new();
+    let mut identities: BTreeSet<_> = unchanged
+        .iter()
+        .filter_map(|row| {
+            Some((
+                row["source"].as_str()?.to_string(),
+                row["id"].as_str()?.to_string(),
+            ))
+        })
+        .collect();
     sessions.retain(|s|{
-        if identities.insert((s.source.clone(),s.id.clone())){true}else{
+        if target.is_some() || identities.insert((s.source.clone(),s.id.clone())){true}else{
             diagnostics.push(json!({"source":s.source,"file":s.file,"reason":"duplicate source/session ID; retained first file"}));false
         }
     });
+    let not_seen = previous.not_seen(
+        sessions
+            .iter()
+            .map(|s| (s.source.as_str(), s.file.as_path()))
+            .chain(unchanged.iter().filter_map(|row| {
+                Some((row["source"].as_str()?, Path::new(row["file"].as_str()?)))
+            })),
+    );
     let found: BTreeSet<_> = sessions
         .iter()
         .filter(|s| s.source == "dsh")
         .map(|s| s.id.clone())
+        .chain(
+            unchanged
+                .iter()
+                .filter(|row| row["source"] == "dsh")
+                .filter_map(|row| row["id"].as_str().map(String::from)),
+        )
         .collect();
     let missing: Vec<_> = ids.iter().filter(|id| !registered(&found, id)).collect();
     let registry = json!({"dsh_expected":ids.len(),"dsh_found":found.len(),"missing":missing});
@@ -329,6 +436,10 @@ pub fn discover(environment: &Environment, project: &Path, content: bool) -> Res
         diagnostics,
         registry,
         project,
+        unchanged,
+        not_seen,
+        incremental: since.is_some(),
+        content_search: content,
     })
 }
 

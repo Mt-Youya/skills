@@ -46,17 +46,18 @@ pub fn bytes(input: &[u8]) -> (Vec<u8>, BTreeMap<String, usize>) {
     let mut output = input.to_vec();
     let mut counts = BTreeMap::new();
     for rule in RULES.iter() {
-        output = rule
-            .re
-            .replace_all(&output, |captures: &Captures<'_>| {
-                let mut result = Vec::new();
-                captures.expand(rule.replacement.as_bytes(), &mut result);
-                if result != captures[0] {
-                    *counts.entry(rule.name.into()).or_insert(0) += 1;
-                }
-                result
-            })
-            .into_owned();
+        let replaced = rule.re.replace_all(&output, |captures: &Captures<'_>| {
+            let mut result = Vec::new();
+            captures.expand(rule.replacement.as_bytes(), &mut result);
+            if result != captures[0] {
+                *counts.entry(rule.name.into()).or_insert(0) += 1;
+            }
+            result
+        });
+        // A no-match rule returns a borrowed slice; keep the existing buffer.
+        if let std::borrow::Cow::Owned(replaced) = replaced {
+            output = replaced;
+        }
     }
     (output, counts)
 }
@@ -137,6 +138,16 @@ mod tests {
         assert!(!output.contains("long-password"));
         assert!(!output.contains("abcdefghijk"));
         assert_eq!(output, text(&output));
+    }
+    #[test]
+    fn no_match_buffers_and_replacement_counts_preserve_bytes() {
+        let clean = "中文 context\n".repeat(1000);
+        let (output, counts) = bytes(clean.as_bytes());
+        assert_eq!(output, clean.as_bytes());
+        assert!(counts.is_empty());
+        let (output, counts) = bytes(format!("{clean}SESSDATA=abcdefghijklmnop").as_bytes());
+        assert_eq!(output, format!("{clean}SESSDATA=[redacted]").as_bytes());
+        assert_eq!(counts.values().sum::<usize>(), 1);
     }
     #[test]
     fn binary_bytes_survive() {

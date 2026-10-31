@@ -93,7 +93,7 @@ fn title(id: &str, body: &str) -> String {
 }
 
 fn render(archive: &Archive) -> String {
-    let mut text = format!("# Evidence archive\n\n- Sections: {}\n- Updated: {}\n- Kept in one file on purpose: one section per pitfall, still greppable after `unpack`.\n- Print a single section without unpacking: `sarch evidence show --id <ID>`\n\n| ID | Pitfall | Segments | Session lines |\n| --- | --- | --- | --- |\n",archive.len(),files::now().to_rfc3339_opts(chrono::SecondsFormat::Millis,true));
+    let mut text = format!("# Evidence archive\n\n- Sections: {}\n- Updated: {}\n- Kept in one file on purpose: one section per pitfall, still greppable after `unpack`.\n- Print a single section without unpacking: `search evidence show --id <ID>`\n\n| ID | Pitfall | Segments | Session lines |\n| --- | --- | --- | --- |\n",archive.len(),files::now().to_rfc3339_opts(chrono::SecondsFormat::Millis,true));
     for (id, body) in archive {
         let excerpts = segments(body);
         let ranges = excerpts
