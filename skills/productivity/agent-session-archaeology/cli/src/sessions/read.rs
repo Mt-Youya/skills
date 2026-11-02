@@ -34,6 +34,7 @@ pub fn page(file: &Path, from: usize, to: Option<usize>, limit: usize) -> Result
     let mut records = Vec::new();
     let mut n = 0;
     let mut eof = false;
+    let mut redactor = redact::LineRedactor::default();
     loop {
         text.clear();
         if reader.read_line(&mut text)? == 0 {
@@ -44,8 +45,9 @@ pub fn page(file: &Path, from: usize, to: Option<usize>, limit: usize) -> Result
         if n > to {
             break;
         }
+        let redacted = redactor.text(text.trim_end_matches('\n'));
         if n >= from {
-            records.push(json!({"line":n,"text":redact::text(text.trim_end_matches('\n'))}));
+            records.push(json!({"line":n,"text":redacted}));
         }
     }
     if records.is_empty() {

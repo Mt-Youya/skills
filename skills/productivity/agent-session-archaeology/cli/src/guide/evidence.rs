@@ -172,7 +172,8 @@ pub fn add(args: Add<'_>) -> Result<Value> {
         let file = PathBuf::from(&m[1]);
         let from = m[2].parse::<usize>()?;
         let to = m[3].parse::<usize>()?;
-        let text = redact::text(&files::slice(&files::read_text(&file)?, from, to)?);
+        let original = files::read_text(&file)?;
+        let text = redact::text(&files::slice(&redact::lines(&original), from, to)?);
         if text.trim().is_empty() {
             bail!("evidence excerpt is empty");
         }

@@ -27,7 +27,7 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         ("bare JWT", r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}".into(), "[redacted]"),
         ("connection string password", r"(?i)(\b[a-z][a-z0-9+.\-]{1,20}://)([^/\s@:]{0,64}):([^@\s/]{4,})@".into(), "${1}${2}:[redacted]@"),
         ("aws access key id", r"\bAKIA[0-9A-Z]{16}\b".into(), "[redacted]"),
-        ("private key block", r"-----BEGIN (?:RSA |OPENSSH |EC |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |OPENSSH |EC |PGP )?PRIVATE KEY-----".into(), "[redacted private key]"),
+        ("private key block", r"-----BEGIN (?:RSA |DSA |OPENSSH |EC |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END (?:RSA |DSA |OPENSSH |EC |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----|\z)".into(), "[redacted private key]"),
     ];
     specs
         .into_iter()
@@ -64,6 +64,41 @@ pub fn bytes(input: &[u8]) -> (Vec<u8>, BTreeMap<String, usize>) {
 
 pub fn text(input: &str) -> String {
     String::from_utf8(bytes(input.as_bytes()).0).expect("redaction preserves UTF-8")
+}
+
+// Track private-key blocks from the start of the original, including lines before a page.
+// Replacing each affected line separately preserves source coordinates for evidence ranges.
+#[derive(Default)]
+pub struct LineRedactor {
+    private_key: bool,
+}
+
+impl LineRedactor {
+    pub fn text(&mut self, input: &str) -> String {
+        static BOUNDARY: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"-----(BEGIN|END) (?:RSA |DSA |OPENSSH |EC |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----")
+                .expect("built-in private-key boundary")
+        });
+        let mut sensitive = self.private_key;
+        for marker in BOUNDARY.captures_iter(input.as_bytes()) {
+            sensitive = true;
+            self.private_key = &marker[1] == b"BEGIN";
+        }
+        if sensitive {
+            "[redacted private key]".into()
+        } else {
+            text(input)
+        }
+    }
+}
+
+pub fn lines(input: &str) -> String {
+    let mut redactor = LineRedactor::default();
+    input
+        .split('\n')
+        .map(|line| redactor.text(line))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub fn directory(dir: &Path, dry_run: bool) -> Result<Value> {
@@ -129,6 +164,29 @@ pub fn directory(dir: &Path, dry_run: bool) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn incomplete_and_encrypted_private_keys_are_redacted() {
+        for label in [
+            "DSA PRIVATE KEY",
+            "ENCRYPTED PRIVATE KEY",
+            "PGP PRIVATE KEY BLOCK",
+        ] {
+            let input = format!("before\n-----BEGIN {label}-----\nsynthetic-key-body");
+            assert_eq!(text(&input), "before\n[redacted private key]");
+            let complete = format!("{input}\n-----END {label}-----\nafter");
+            assert_eq!(text(&complete), "before\n[redacted private key]\nafter");
+        }
+    }
+
+    #[test]
+    fn line_redaction_preserves_coordinates_and_resumes_after_keys() {
+        let input = "before\n-----BEGIN PRIVATE KEY-----\nbody\n-----END PRIVATE KEY-----\nafter\n";
+        let output = lines(input);
+        assert_eq!(input.split('\n').count(), output.split('\n').count());
+        assert_eq!(output, "before\n[redacted private key]\n[redacted private key]\n[redacted private key]\nafter\n");
+        assert_eq!(lines(&output), output);
+    }
+
     #[test]
     fn redaction_preserves_context_and_converges() {
         let input = "Session: real-session-id\nSession_id=abcdefghijklmnop\nCookie: foo=abcdefghi\nAuthorization: Basic abcdefghijklmnop==\npostgres://user:long-password@host/db\nSESSDATA=abcdefghijklmnop\nWEBHOOK_SECRET=abcdefghijklmnop\n\"name\":\"bili_jct\",\"value\":\"abcdefghijk\"\nghp_abcdefghijklmnopqrstuvwxyz\n";

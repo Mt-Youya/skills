@@ -52,7 +52,12 @@ pub fn norm(path: &str) -> String {
             .to_string_lossy()
             .to_string()
     };
-    path.trim_end_matches('/').to_lowercase()
+    let path = path.trim_end_matches('/');
+    if cfg!(windows) || path.as_bytes().get(1) == Some(&b':') {
+        path.to_lowercase()
+    } else {
+        path.to_string()
+    }
 }
 
 pub fn within(cwd: &str, project: &str) -> bool {
@@ -131,4 +136,18 @@ pub fn walk(dir: &Path, depth: usize) -> Result<Vec<PathBuf>> {
     }
     found.sort();
     Ok(found)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn unresolved_case_distinct_paths_are_not_the_same_project() {
+        let root = tempfile::tempdir().unwrap();
+        let upper = norm(root.path().join("Project").to_str().unwrap());
+        let lower = root.path().join("project");
+        assert!(!within(lower.to_str().unwrap(), &upper));
+    }
 }

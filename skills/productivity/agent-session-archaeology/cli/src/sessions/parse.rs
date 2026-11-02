@@ -106,7 +106,8 @@ pub(super) fn parse_file(
     } else if content
         && session.messages.iter().any(|m| {
             let text = m.text.to_lowercase();
-            text.contains(project)
+            let project = project.to_lowercase();
+            text.contains(&project)
                 || text.contains(&project.replace('/', "\\"))
                 || (cfg!(target_os = "macos")
                     && project
