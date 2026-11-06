@@ -1,0 +1,49 @@
+{
+  "skill_name": "http-api-contracts",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Perform a design review only; do not access the current repository or modify files. Scenario: there is an existing Node API and an OpenAPI 3.1 contract. You are now adding POST /api/projects. The request field name is a required string; note may be omitted or null; unknown fields are ignored by the existing DTO. A successful 201 response returns id/name/note, and the delete endpoint returns 204. The business limit for name is 100 UTF-8 bytes, and IDs are consumed as JavaScript numbers. The generator does not yet support OAS3.2, and the task adds only this one resource. Provide a minimal implementation plan, a contract snippet, and an acceptance checklist, and explain whether all endpoints need to be upgraded. Do not claim to have run tests.",
+      "expected_output": "Preserve the existing compatibility scope without upgrading the entire site for one resource; accurately express required/null/unknown-field behavior, byte length, and JS safe integers; verify actual HTTP behavior and client handling of 204 without fabricating execution results.",
+      "files": [],
+      "expectations": [
+        "Keep OpenAPI 3.1; do not mechanically change the version string or require a site-wide contract refactor",
+        "Distinguish required name from note, which may be omitted and may be null; do not tighten unknown-field handling by default",
+        "Make clear that the UTF-8 byte limit cannot be directly equated with JSON Schema maxLength",
+        "Explain the JavaScript safe integer boundary or provide a compatible ID strategy",
+        "Acceptance checks cover actual 201 responses, 204 with no body and no Content-Length, and corresponding client changes to avoid parsing 204 as JSON",
+        "Do not claim to have executed tests that were not run or claim that Location is mandatory for 201"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Review only the following simulated facts; do not read the current repository or modify files. The yd_session cookie is the sole session credential. Users log in with an email and password in JSON, and the API does not support Basic/Bearer. A missing cookie, an expired cookie, and a session database failure all return 401, with no WWW-Authenticate in any of these responses. The framework already supports HEAD for routes registered as GET. At the final response stage, the framework adds Content-Length:0 to an exactly empty body. DELETE returns 204. Identify confirmed issues and items requiring verification under HTTP semantics, and design a minimal fix and runnable regression tests. Do not invent a generic Cookie challenge that does not exist in an established standard.",
+      "expected_output": "Identify the 401 challenge requirement, misreported DB failures, and the 204 length issue; do not pretend to use Basic/Bearer; verify the framework's final stage and wire-level behavior; explain the tradeoffs of an extension approach rather than falsely claiming compliance.",
+      "files": [],
+      "expectations": [
+        "Point out that 401 requires WWW-Authenticate applicable to the target resource",
+        "Do not add a false Basic/Bearer challenge; make clear that the cookie approach needs an authentication design or a disclosed extension",
+        "Preserve 5xx for session database failures, and add a closed-pool test with a valid cookie",
+        "Content-Length is forbidden on 204, even when its value is 0; account for the framework's final stage rather than only removing it in the handler",
+        "Verify that HEAD has no body and a valid representation length, and use raw HTTP to verify 204",
+        "Distinguish confirmed facts from framework behavior requiring actual testing; do not automatically unify all errors as 422"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Provide only a review and a minimal fix plan; do not access the current repository or modify files. Simulated SSE gateway: an upstream 401 carries two WWW-Authenticate fields and Content-Type:text/plain, while a 405 carries Allow; the response allowlist preserves only Content-Type. When Connection:X-Should-Retry is received, X-Should-Retry is still forwarded. The request URL is constructed with new URL(path, origin), where path comes from an external source and may be //other.example/x. The gateway observes gzip bytes, but the client has not enabled decoding. The SSE producer awaits tx.send inside the heartbeat branch of select, with no deadline once the queue is full. It first caches valid usage, then receives invalid usage but still uses the old value to settle. OpenAPI declares only application/json/application/octet-stream. The actual edge proxy uses Fetch and does not know the inbound HTTP version. Distinguish mandatory HTTP requirements, interface policies, and platform limitations, and list regression checks.",
+      "expected_output": "Cover multi-value headers/dynamic hop-by-hop headers, URL origin, compression decoding, backpressure and accounting, actual media ranges, and Via limitations; keep SSE unbuffered and do not fabricate termination.",
+      "files": [],
+      "expectations": [
+        "Preserve both WWW-Authenticate fields and the 405 Allow field, and filter headers according to dynamic Connection options",
+        "Prevent //path from replacing the configured origin, and preserve trusted sources for credentials and headers",
+        "Use standard decoding or a strategy that forwards the encoding unchanged; do not directly parse gzip bytes when observing SSE",
+        "Apply deadlines to all sends, including heartbeats and the final error, and test permit release when the downstream does not read",
+        "Invalid usage must not reuse the previous settlement basis; distinguish ordinary events without usage from invalid evidence, and test event sequences",
+        "Use accurate media ranges and matching precedence in OpenAPI; application/octet-stream does not represent text/plain",
+        "When Fetch does not expose the inbound version, do not fabricate Via 1.1 or claim a standards exemption",
+        "Do not buffer production SSE or fabricate DONE; separately verify transport errors after response headers have been committed and accounting reconciliation"
+      ]
+    }
+  ]
+}

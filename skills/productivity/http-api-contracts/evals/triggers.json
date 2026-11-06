@@ -1,0 +1,22 @@
+[
+  {"query":"Add a POST creation endpoint at /api/projects and update the frontend request types as well.","should_trigger":true},
+  {"query":"The endpoint now crashes when null is sent. Help me check whether the request DTO and schema are inconsistent.","should_trigger":true},
+  {"query":"Why does this proxy drop WWW-Authenticate? Can we make it follow the HTTP standard?","should_trigger":true},
+  {"query":"Describe the existing backend with OpenAPI without changing consumers' URLs.","should_trigger":true},
+  {"query":"Have we used default and required incorrectly in JSON Schema 2020-12?","should_trigger":true},
+  {"query":"Slow SSE clients block concurrency slots. Check the gateway's heartbeats and deadlines.","should_trigger":true},
+  {"query":"The delete Key endpoint returns 204, but response.json fails on the frontend. Fix it.","should_trigger":true},
+  {"query":"Add signature verification and duplicate-delivery regression tests for the webhook without rewriting the raw body.","should_trigger":true},
+  {"query":"Review how the HTTP client handles non-JSON error responses.","should_trigger":true},
+  {"query":"The API has already passed Swagger validation. Help me check whether the actual responses match.","should_trigger":true},
+  {"query":"Reduce the card spacing on the endpoint list page; leave the backend unchanged.","should_trigger":false},
+  {"query":"Explain the difference between TypeScript interface and type.","should_trigger":false},
+  {"query":"Change a trait's method signature in a Rust module; no HTTP is involved.","should_trigger":false},
+  {"query":"Query this week's redemption count in the database without changing any APIs.","should_trigger":false},
+  {"query":"Write promotional copy for an API product without reviewing code or interface contracts.","should_trigger":false},
+  {"query":"Adjust the CSS fonts and dark theme on the Swagger page without changing the description file.","should_trigger":false},
+  {"query":"Rename the Button component's props in the design system; this is unrelated to the server.","should_trigger":false},
+  {"query":"Look up the publication date of the HTTP specification for me; no endpoint implementation or review is needed.","should_trigger":false},
+  {"query":"Add an index for an internal database ledger query; do not examine the API layer for now.","should_trigger":false},
+  {"query":"Help me pick a logo for an OpenAPI project.","should_trigger":false}
+]
