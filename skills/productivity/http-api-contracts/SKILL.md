@@ -11,7 +11,7 @@ metadata:
 
 # HTTP API Contracts and Implementation Standards
 
-[Chinese version](SKILL.zh-CN.md). English is the canonical entry point; the translation describes the same workflow and is not a separate skill. Authoring language does not override the user's or workspace's response-language instructions.
+[Chinese version](SKILL.zh.md). English is the canonical entry point; the translation describes the same workflow and is not a separate skill. Authoring language does not override the user's or workspace's response-language instructions.
 
 Require three kinds of evidence: correct HTTP behavior, valid machine-readable contracts, and real requests/responses that match those contracts. Passing a document's meta-schema does not establish runtime conformance; green tests do not establish complete endpoint coverage.
 
